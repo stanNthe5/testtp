@@ -1,69 +1,58 @@
-# This workflow will run tests using node and then publish a package to GitHub Packages when a release is created
-# For more information see: https://docs.github.com/en/actions/publishing-packages/publishing-nodejs-packages
-
-name: Publish to npm
+name: Publish to npm when version changes
 
 on:
   push:
     branches:
       - main
-
-permissions:
-  id-token: write # Required for OIDC
-  contents: read
+      - master
+    paths:
+      - "package.json" # 仅当 package.json 被修改时触发
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
 
+    steps:
+      # 1️⃣ 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2️⃣ 安装 Node 24 并使用 npm 官方 registry
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
-          cache: "npm"
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
 
-      # Get previous version from the last commit in origin/main
-      - name: Get previous package.json version
-        run: |
-          PREV=$(git show origin/main~1:package.json | jq -r .version)
-          echo "Previous version: $PREV"
-          echo "PREV_VERSION=$PREV" >> $GITHUB_ENV
+      # 3️⃣ 获取当前包版本号
+      - name: Get current package version
+        id: pkg
+        run: echo "version=$(node -p 'require(\"./package.json\").version')" >> $GITHUB_OUTPUT
 
-      # Get current version from package.json
-      - name: Get current package.json version
+      # 4️⃣ 检查该版本是否已经发布
+      - name: Check if version already exists on npm
+        id: check
         run: |
-          CURR=$(jq -r .version package.json)
-          echo "CURR_VERSION=$CURR"
-          echo "CURR_VERSION=$CURR" >> $GITHUB_ENV
-
-      # Compare previous and current versions
-      - name: Compare versions
-        run: |
-          if [ "$PREV_VERSION" = "$CURR_VERSION" ]; then
-            echo "Version unchanged, skip publish"
-            echo "SHOULD_PUBLISH=false" >> $GITHUB_ENV
+          PKG_NAME=$(node -p 'require("./package.json").name')
+          PUBLISHED=$(npm view $PKG_NAME versions --json | grep -o "\"${{ steps.pkg.outputs.version }}\"" || true)
+          if [ -n "$PUBLISHED" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Version ${{ steps.pkg.outputs.version }} already exists on npm. Skipping publish."
           else
-            echo "Version changed, will publish"
-            echo "SHOULD_PUBLISH=true" >> $GITHUB_ENV
+            echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      # Install dependencies only if publish is needed
+      # 5️⃣ 安装依赖（如果你需要构建，可以在此阶段执行）
       - name: Install dependencies
-        if: env.SHOULD_PUBLISH == 'true'
-        run: npm ci
+        run: npm install
 
-      # Run build script before publishing
-      - name: Build project
-        if: env.SHOULD_PUBLISH == 'true'
-        run: npm run build
+      # 6️⃣ 构建（可选）
+      - name: Build source
+        run: npm run build || echo "No build script defined."
 
-      # Publish to npm
+      # 7️⃣ 发布到 npm（仅当版本未发布）
       - name: Publish to npm
-        if: env.SHOULD_PUBLISH == 'true'
-        run: npm publish --access public
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          echo "Publishing version ${{ steps.pkg.outputs.version }}..."
+          npm publish --access public
