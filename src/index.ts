@@ -1,2 +1,2 @@
-let s: string = 'abc'
+let s: string = 'abcd'
 console.log(s)
