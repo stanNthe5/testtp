@@ -8,6 +8,10 @@ on:
     paths:
       - "package.json" # 仅当 package.json 被修改时触发
 
+permissions:
+  id-token: write # ✅ Required for npm Trusted Publisher (OIDC)
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
